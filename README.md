@@ -18,11 +18,26 @@ A command-line tool that generates shell commands from natural language descript
 - Go 1.24.6 or later
 - OpenAI API token
 
-### Build from Source
+### Option 1: Install with go install (Recommended)
+
+```bash
+go install github.com/brainexe/ai@latest
+```
+
+### Option 2: Download Pre-built Binaries
+
+Download the latest release for your platform from the [releases page](https://github.com/brainexe/ai/releases).
+
+Available platforms:
+- Linux (amd64, arm64)
+- macOS (amd64, arm64)
+- Windows (amd64)
+
+### Option 3: Build from Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/brainexe/ai-cli.git
+git clone https://github.com/brainexe/ai.git
 cd ai-cli
 
 # Install dependencies
@@ -131,6 +146,20 @@ make clean
 # Run linter
 make lint
 ```
+
+### CI/CD Pipeline
+
+The project uses GitHub Actions for continuous integration and deployment:
+
+- **CI Pipeline**: Runs on every push and pull request
+  - Builds and tests the code
+  - Runs linter checks
+  - Creates build artifacts for all supported platforms
+  
+- **Release Pipeline**: Triggered on version tags
+  - Builds binaries for all platforms (Linux, macOS, Windows)
+  - Creates GitHub releases with downloadable artifacts
+  - Supports both amd64 and arm64 architectures
 
 ### Code Style
 
