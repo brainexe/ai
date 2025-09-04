@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+    
+    - name: Download dependencies
+      run: go mod download
+    
+    - name: Run linter
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: latest
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            name: ai-linux-amd64
+          - goos: linux
+            goarch: arm64
+            name: ai-linux-arm64
+          - goos: darwin
+            goarch: amd64
+            name: ai-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            name: ai-darwin-arm64
+          - goos: windows
+            goarch: amd64
+            name: ai-windows-amd64.exe
+          - goos: windows
+            goarch: arm64
+            name: ai-windows-arm64.exe
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+    
+    - name: Download dependencies
+      run: go mod download
+    
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        go build -ldflags="-s -w" -o ${{ matrix.name }} .
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.name }}
+        path: ${{ matrix.name }}

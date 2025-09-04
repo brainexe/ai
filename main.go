@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,25 +24,31 @@ const (
 )
 
 type responseReq struct {
-	Model          string                 `json:"model"`
-	Input          string                 `json:"input"`
-	N              int                    `json:"n,omitempty"`
-	MaxOutput      int                    `json:"max_output_tokens,omitempty"`
-	Temperature    float64                `json:"temperature,omitempty"`
-	Text           map[string]any         `json:"text,omitempty"`
+	Model     string         `json:"model"`
+	Input     string         `json:"input"`
+	MaxOutput int            `json:"max_output_tokens,omitempty"`
+	Text      map[string]any `json:"text,omitempty"`
+	Reasoning map[string]any `json:"reasoning,omitempty"`
 }
 
 type responseResp struct {
-	ID         string        `json:"id"`
-	Object     string        `json:"object"`
-	Created    int64         `json:"created"`
-	Model      string        `json:"model"`
-	Output     []outputItem  `json:"output,omitempty"`
-	OutputText string        `json:"output_text,omitempty"`
-	Candidates []candidate   `json:"candidates,omitempty"`
+	ID         string       `json:"id"`
+	Object     string       `json:"object"`
+	Created    int64        `json:"created"`
+	Model      string       `json:"model"`
+	Output     []outputItem `json:"output,omitempty"`
+	OutputText string       `json:"output_text,omitempty"`
+	Candidates []candidate  `json:"candidates,omitempty"`
 }
 
 type outputItem struct {
+	Type    string        `json:"type,omitempty"`
+	Text    string        `json:"text,omitempty"`
+	Content []contentPart `json:"content,omitempty"`
+	Role    string        `json:"role,omitempty"`
+}
+
+type contentPart struct {
 	Type string `json:"type,omitempty"`
 	Text string `json:"text,omitempty"`
 }
@@ -60,9 +67,51 @@ type candidatePart struct {
 	Text string `json:"text,omitempty"`
 }
 
+type apiCallResult struct {
+	Commands    []string        `json:"commands"`
+	Duration    time.Duration   `json:"duration"`
+	RawResponse json.RawMessage `json:"raw_response"`
+	Error       error           `json:"error,omitempty"`
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: ai <task description>\nExample: ai find biggest file here")
+		fmt.Fprintln(os.Stderr, "Usage: ai [-v] [-n <number>] <task description>\nExample: ai find biggest file here\n       ai -v list files in current dir\n       ai -n 5 find files here")
+		os.Exit(2)
+	}
+
+	// Parse flags
+	var verbose bool
+	var numCommands int = 3 // default
+	var taskStart int = 1
+
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "-v" {
+			verbose = true
+			taskStart = i + 1
+		} else if arg == "-n" {
+			if i+1 >= len(os.Args) {
+				fmt.Fprintln(os.Stderr, "Error: -n requires a number argument")
+				os.Exit(2)
+			}
+			var err error
+			numCommands, err = strconv.Atoi(os.Args[i+1])
+			if err != nil || numCommands < 1 {
+				fmt.Fprintln(os.Stderr, "Error: -n requires a positive integer")
+				os.Exit(2)
+			}
+			i++ // skip the number argument
+			taskStart = i + 1
+		} else {
+			// First non-flag argument starts the task description
+			taskStart = i
+			break
+		}
+	}
+
+	if taskStart >= len(os.Args) {
+		fmt.Fprintln(os.Stderr, "Usage: ai [-v] [-n <number>] <task description>")
 		os.Exit(2)
 	}
 
@@ -72,22 +121,28 @@ func main() {
 		os.Exit(2)
 	}
 
-	task := strings.Join(os.Args[1:], " ")
+	task := strings.Join(os.Args[taskStart:], " ")
 
 	contextInfo := gatherContext()
 	prompt := buildPrompt(task, contextInfo)
 
-	cmds, err := getCommands(context.Background(), token, prompt, 3)
+	results, err := getCommands(context.Background(), token, prompt, verbose, numCommands)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "API error:", err)
 		os.Exit(1)
 	}
-	if len(cmds) == 0 {
+	if len(results) == 0 || len(results[0].Commands) == 0 {
 		fmt.Fprintln(os.Stderr, "No commands generated")
 		os.Exit(1)
 	}
 
-	choice, err := selectCommand(cmds)
+	// Show verbose output if requested
+	if verbose {
+		printVerboseOutput(results)
+	}
+
+	// Use the first result (combined/aggregated) for command selection
+	choice, err := selectCommand(results[0].Commands)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Selection error:", err)
 		os.Exit(1)
@@ -107,34 +162,89 @@ func main() {
 	}
 }
 
-func gatherContext() map[string]string {
-	pwd, _ := os.Getwd()
-	user := os.Getenv("USER")
-	if user == "" {
-		user = os.Getenv("USERNAME")
+func printVerboseOutput(results []apiCallResult) {
+	if len(results) == 0 {
+		return
 	}
+
+	combinedResult := results[0]     // First result is the combined/aggregated result
+	individualResults := results[1:] // Rest are individual API call results
+
+	fmt.Println("=== VERBOSE OUTPUT ===")
+	fmt.Printf("Commands generated: %d\n", len(combinedResult.Commands))
+
+	// Show timing information
+	if len(individualResults) > 0 {
+		fmt.Printf("Total API request time: %v\n", combinedResult.Duration)
+		fmt.Printf("Number of concurrent API calls: %d\n", len(individualResults))
+		fmt.Printf("Average API request time: %v\n", combinedResult.Duration/time.Duration(len(individualResults)))
+	} else {
+		fmt.Printf("API request time: %v\n", combinedResult.Duration)
+	}
+
+	// Show the generated commands
+	fmt.Println("\nGenerated commands:")
+	for i, cmd := range combinedResult.Commands {
+		fmt.Printf("  %d) %s\n", i+1, cmd)
+	}
+
+	// Show raw API responses from individual calls if available
+	rawResponses := 0
+	for i, r := range individualResults {
+		if len(r.RawResponse) > 0 {
+			rawResponses++
+			fmt.Printf("\nAPI Call %d Response (pretty-printed):\n", i+1)
+			var prettyJSON bytes.Buffer
+			if err := json.Indent(&prettyJSON, r.RawResponse, "", "  "); err == nil {
+				fmt.Println(prettyJSON.String())
+			} else {
+				fmt.Println(string(r.RawResponse))
+			}
+		}
+	}
+
+	if rawResponses == 0 {
+		fmt.Println("\nNote: Raw API responses not captured (may be due to error or non-verbose mode)")
+	}
+
+	fmt.Println("=== END VERBOSE OUTPUT ===")
+}
+
+func gatherContext() map[string]string {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "sh"
 	}
-	tz, _ := time.Now().In(time.Local).Zone()
+	systemInfo := readSystemInfo()
 
 	return map[string]string{
 		"os":        runtime.GOOS,
 		"arch":      runtime.GOARCH,
 		"shell":     shell,
-		"pwd":       pwd,
-		"user":      user,
-		"timezone":  tz,
 		"safe_mode": "on",
-		"locale":    os.Getenv("LANG"),
+		"system":    systemInfo,
 	}
+}
+
+func readSystemInfo() string {
+	data, err := os.ReadFile("/etc/issue")
+	if err != nil {
+		return ""
+	}
+	content := string(data)
+
+	// Strip \n \l and extra whitespace
+	content = strings.ReplaceAll(content, "\\n", "")
+	content = strings.ReplaceAll(content, "\\l", "")
+	content = strings.TrimSpace(content)
+
+	return content
 }
 
 func buildPrompt(task string, ctx map[string]string) string {
 	var b strings.Builder
 	b.WriteString("You are a shell command generator.\n")
-	b.WriteString("Output exactly one safe, single-line command for POSIX sh/zsh.\n")
+	b.WriteString("Output exactly one safe, single-line command for POSIX " + ctx["shell"] + "\n")
 	b.WriteString("Rules:\n")
 	b.WriteString("- NO explanations or extra text. Only the command.\n")
 	b.WriteString("- Avoid destructive actions (rm -rf, chmod -R, sudo, moving/deleting) unless explicitly requested.\n")
@@ -156,65 +266,167 @@ func buildPrompt(task string, ctx map[string]string) string {
 	return b.String()
 }
 
-func getCommands(ctx context.Context, token, prompt string, n int) ([]string, error) {
-	reqBody := responseReq{
-		Model:       modelName,
-		Input:       prompt,
-		N:           n,
-		MaxOutput:   128,
-		Temperature: 0.2,
-		Text: map[string]any{
-			"format": "text",
-		},
+func getCommands(ctx context.Context, token, prompt string, verbose bool, numCommands int) ([]apiCallResult, error) {
+	numConcurrentCalls := numCommands
+
+	type apiResult struct {
+		result apiCallResult
+		err    error
 	}
 
-	b, _ := json.Marshal(reqBody)
-	httpReq, _ := http.NewRequestWithContext(ctx, "POST", openAIEndpoint, bytes.NewReader(b))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+token)
+	results := make(chan apiResult, numConcurrentCalls)
+	var wg sync.WaitGroup
 
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	resp, err := httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		data, _ := ioReadAll(resp)
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(data))
+	// Function to make a single API call
+	makeAPICall := func() {
+		defer wg.Done()
+		startTime := time.Now()
+
+		reqBody := responseReq{
+			Model:     modelName,
+			Input:     prompt,
+			MaxOutput: 500,
+			Text: map[string]any{
+				"format": map[string]any{
+					"type": "text",
+				},
+			},
+			Reasoning: map[string]any{
+				"effort": "minimal",
+			},
+		}
+
+		b, _ := json.Marshal(reqBody)
+		httpReq, _ := http.NewRequestWithContext(ctx, "POST", openAIEndpoint, bytes.NewReader(b))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+
+		httpClient := &http.Client{Timeout: 30 * time.Second}
+		resp, err := httpClient.Do(httpReq)
+		if err != nil {
+			results <- apiResult{apiCallResult{Error: err, Duration: time.Since(startTime)}, err}
+			return
+		}
+		defer resp.Body.Close()
+
+		// Read the full response body for verbose mode or error handling
+		var rawResponse json.RawMessage
+		var respData []byte
+		if verbose {
+			if data, err := ioReadAll(resp); err == nil {
+				respData = data
+				rawResponse = data
+			}
+		} else {
+			// For non-verbose mode, still read the body for error handling
+			if data, err := ioReadAll(resp); err == nil {
+				respData = data
+			}
+		}
+
+		if resp.StatusCode >= 400 {
+			err := fmt.Errorf("status %d: %s", resp.StatusCode, string(respData))
+			results <- apiResult{apiCallResult{Error: err, Duration: time.Since(startTime), RawResponse: rawResponse}, err}
+			return
+		}
+
+		var rr responseResp
+		if respData != nil {
+			// Use the already read data
+			if err := json.Unmarshal(respData, &rr); err != nil {
+				results <- apiResult{apiCallResult{Error: err, Duration: time.Since(startTime), RawResponse: rawResponse}, err}
+				return
+			}
+		} else {
+			// Fallback to streaming decode if we didn't read the data
+			if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
+				results <- apiResult{apiCallResult{Error: err, Duration: time.Since(startTime), RawResponse: rawResponse}, err}
+				return
+			}
+		}
+
+		candidates := extractCandidates(rr)
+		if len(candidates) == 0 && rr.OutputText != "" {
+			candidates = []string{rr.OutputText}
+		}
+		if len(candidates) == 0 {
+			for _, it := range rr.Output {
+				if strings.TrimSpace(it.Text) != "" {
+					candidates = append(candidates, it.Text)
+				} else if len(it.Content) > 0 {
+					for _, part := range it.Content {
+						if strings.TrimSpace(part.Text) != "" {
+							candidates = append(candidates, part.Text)
+						}
+					}
+				}
+			}
+		}
+
+		var commands []string
+		for _, c := range candidates {
+			cmd := sanitizeToSingleCommand(c)
+			if cmd != "" {
+				commands = append(commands, cmd)
+			}
+		}
+
+		results <- apiResult{apiCallResult{Commands: commands, Duration: time.Since(startTime), RawResponse: rawResponse}, nil}
 	}
 
-	var rr responseResp
-	if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
-		return nil, err
+	// Launch concurrent API calls
+	for i := 0; i < numConcurrentCalls; i++ {
+		wg.Add(1)
+		go makeAPICall()
 	}
 
-	candidates := extractCandidates(rr)
-	if len(candidates) == 0 && rr.OutputText != "" {
-		candidates = []string{rr.OutputText}
+	// Wait for all goroutines to complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect all results
+	var allResults []apiCallResult
+	var firstError error
+
+	for result := range results {
+		if result.err != nil && firstError == nil {
+			firstError = result.err
+		}
+		allResults = append(allResults, result.result)
 	}
-	if len(candidates) == 0 {
-		for _, it := range rr.Output {
-			if strings.TrimSpace(it.Text) != "" {
-				candidates = append(candidates, it.Text)
+
+	if firstError != nil {
+		return nil, firstError
+	}
+
+	// Deduplicate commands across all successful results
+	unique := make([]string, 0)
+	seen := map[string]struct{}{}
+	for _, result := range allResults {
+		for _, cmd := range result.Commands {
+			if _, ok := seen[cmd]; !ok {
+				seen[cmd] = struct{}{}
+				unique = append(unique, cmd)
 			}
 		}
 	}
 
-	unique := make([]string, 0, len(candidates))
-	seen := map[string]struct{}{}
-	for _, c := range candidates {
-		cmd := sanitizeToSingleCommand(c)
-		if cmd == "" {
-		 continue
-		}
-		if _, ok := seen[cmd]; ok {
-			continue
-		}
-		seen[cmd] = struct{}{}
-		unique = append(unique, cmd)
+	// Create a combined result with all unique commands and total duration
+	totalDuration := time.Duration(0)
+	for _, result := range allResults {
+		totalDuration += result.Duration
 	}
-	return unique, nil
+
+	combinedResult := apiCallResult{
+		Commands:    unique,
+		Duration:    totalDuration,
+		RawResponse: nil, // Will show individual responses in verbose output
+	}
+
+	// Return the combined result plus all individual results
+	return append([]apiCallResult{combinedResult}, allResults...), nil
 }
 
 func extractCandidates(rr responseResp) []string {
@@ -258,9 +470,6 @@ func sanitizeToSingleCommand(s string) string {
 }
 
 func selectCommand(cmds []string) (string, error) {
-	if len(cmds) == 1 {
-		return cmds[0], nil
-	}
 	fmt.Println("Select a command:")
 	for i, c := range cmds {
 		fmt.Printf("  %d) %s\n", i+1, c)
@@ -288,7 +497,6 @@ func runCommand(command string) error {
 	cmd.Env = os.Environ()
 	return cmd.Run()
 }
-
 func ioReadAll(resp *http.Response) ([]byte, error) {
 	defer resp.Body.Close()
 	var buf bytes.Buffer
