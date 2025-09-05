@@ -1,5 +1,8 @@
 name: Release
 
+permissions:
+  contents: write  # needed to create/update releases
+
 on:
   push:
     tags:
@@ -16,54 +19,48 @@ jobs:
         exclude:
           - goos: windows
             goarch: arm64
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.24.6'
-    
-    - name: Get dependencies
-      run: go mod tidy
-    
-    - name: Build binary
-      env:
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-      run: |
-        mkdir -p dist
-        if [ "${{ matrix.goos }}" = "windows" ]; then
-          go build -o dist/ai-${{ matrix.goos }}-${{ matrix.goarch }}.exe .
-        else
-          go build -o dist/ai-${{ matrix.goos }}-${{ matrix.goarch }} .
-        fi
-    
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ai-${{ matrix.goos }}-${{ matrix.goarch }}
-        path: dist/
-        retention-days: 90
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.6'
+      - name: Get dependencies
+        run: go mod tidy
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            go build -o dist/ai-${{ matrix.goos }}-${{ matrix.goarch }}.exe .
+          else
+            go build -o dist/ai-${{ matrix.goos }}-${{ matrix.goarch }} .
+          fi
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          retention-days: 90
 
   release:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    
+    permissions:
+      contents: write  # can also be set globally as above
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts/
-    
-    - name: Create release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: artifacts/*/*
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
