@@ -2,3 +2,5 @@ vendor/
 
 # Build output
 ai
+
+.idea
