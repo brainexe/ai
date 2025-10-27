@@ -129,6 +129,23 @@ Use the `-n` flag to specify how many commands to generate (default: 3):
 ```bash
 # Generate 5 command options
 ai -n 5 "find large files"
+
+# Combine with verbose mode
+ai -v -n 2 "show disk usage"
+```
+
+Verbose mode displays:
+- Number of commands generated
+- API request timing information
+- All generated command options
+- Raw API responses (pretty-printed JSON)
+
+### Interactive Selection
+
+When multiple commands are generated, you'll be prompted to select one:
+
+```
+ai -n 5 "find large files"
 Select a command:
   1) find . -type f -size +100M
   2) du -ah . | sort -rh | head -10
@@ -156,6 +173,26 @@ make build
 
 # Run linter
 make lint
+```
+
+## Examples
+
+```bash
+# File operations
+ai "show files modified in last 24 hours"
+ai "count lines in all go files"
+
+# System information
+ai "show memory usage"
+ai "list running processes"
+
+# Text processing
+ai "find all TODO comments in source code"
+ai "replace tabs with spaces in all files"
+
+# Network operations
+ai "check if port 8080 is open"
+ai "show network connections"
 ```
 
 ## Configuration
