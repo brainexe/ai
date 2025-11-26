@@ -20,7 +20,7 @@ import (
 
 const (
 	openAIEndpoint = "https://api.openai.com/v1/responses"
-	modelName      = "gpt-5-mini"
+	modelName      = "gpt-5.1"
 )
 
 type responseReq struct {
@@ -292,7 +292,7 @@ func getCommands(ctx context.Context, token, prompt string, verbose bool, numCom
 				},
 			},
 			Reasoning: map[string]any{
-				"effort": "minimal",
+				"effort": "none",
 			},
 		}
 
