@@ -82,15 +82,16 @@ func main() {
 
 	// Parse flags
 	var verbose bool
-	var numCommands int = 3 // default
-	var taskStart int = 1
+	var numCommands = 3 // default
+	var taskStart = 1
 
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
-		if arg == "-v" {
+		switch arg {
+		case "-v":
 			verbose = true
 			taskStart = i + 1
-		} else if arg == "-n" {
+		case "-n":
 			if i+1 >= len(os.Args) {
 				fmt.Fprintln(os.Stderr, "Error: -n requires a number argument")
 				os.Exit(2)
@@ -103,7 +104,7 @@ func main() {
 			}
 			i++ // skip the number argument
 			taskStart = i + 1
-		} else {
+		default:
 			// First non-flag argument starts the task description
 			taskStart = i
 			break
