@@ -20,7 +20,7 @@ import (
 
 const (
 	openAIEndpoint = "https://api.openai.com/v1/responses"
-	modelName      = "gpt-5.1"
+	modelName      = "gpt-5.2"
 )
 
 type responseReq struct {
