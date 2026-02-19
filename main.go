@@ -259,7 +259,7 @@ func buildPrompt(task string, ctx map[string]string) string {
 		if v == "" {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+		fmt.Fprintf(&b, "- %s: %s\n", k, v)
 	}
 	b.WriteString("\nTask:\n")
 	b.WriteString(task)

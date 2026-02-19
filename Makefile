@@ -7,7 +7,8 @@ clean:
 	rm -f ai
 
 lint:
-	golangci-lint run
+	golangci-lint run --fix
+	go fix ./...
 
 install: build
 	cp ai $(GOPATH)/bin/ai

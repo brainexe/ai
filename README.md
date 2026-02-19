@@ -15,7 +15,7 @@ A command-line tool that generates shell commands from natural language descript
 
 ### Prerequisites
 
-- Go 1.24.6 or later
+- Go 1.26 or later
 - OpenAI API token
 
 ### Option 1: Install with go install (Recommended)
