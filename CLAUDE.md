@@ -1,0 +1,1 @@
+/home/matze/projects/ai-cli/AGENTS.md
